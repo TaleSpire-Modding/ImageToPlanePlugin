@@ -13,6 +13,7 @@ namespace ImageToPlane
 
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
+        private ConfigEntry<int> PixelsPerTile { get; set; }
         // Awake is called once when both the game and the plug-in are loaded
         void Awake()
         {
@@ -21,6 +22,7 @@ namespace ImageToPlane
             UnityEngine.Debug.Log("ImageToPlane Plug-in loaded");
             LoadImage = Config.Bind("Hotkeys", "Load Image Shortcut", new KeyboardShortcut(KeyCode.F1));
             ClearImage = Config.Bind("Hotkeys", "Clear Image Shortcut", new KeyboardShortcut(KeyCode.F2));
+            PixelsPerTile = Config.Bind("Scale", "Scale Size", 40);
         }
         
         void Update()
@@ -45,7 +47,7 @@ namespace ImageToPlane
                         if (cube == null) cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
                         Renderer rend = cube.GetComponent<Renderer>();
 
-                        cube.transform.localScale = new Vector3(texture.width / 40f + 0.01f, 0.01f, texture.height / 40f + 0.01f);
+                        cube.transform.localScale = new Vector3(((float)texture.width) / PixelsPerTile.Value + 0.01f, 0.01f, ((float)texture.height) / PixelsPerTile.Value + 0.01f);
 
                         rend.material.mainTexture = texture;
                         rend.material.SetTexture("main", texture);
