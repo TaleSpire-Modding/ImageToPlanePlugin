@@ -15,6 +15,7 @@ Pressing F2 will clear the map of the displayed image.
 The plane currently has no networking so it is only visible locally.
 The plane scales the image to currently render at 40px per tile.
 You can change the bind keys in config editor.
+Image limitation is 16384x16384 pixels in size.
 
 ## How to Compile / Modify
 
