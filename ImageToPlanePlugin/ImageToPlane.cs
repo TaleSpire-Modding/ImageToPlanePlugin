@@ -19,6 +19,7 @@ namespace ImageToPlane
         const string Version = "1.0.5.0";
         private GameObject cube;
         private ConcurrentQueue<PhotonMessage> Queue;
+        private JsonSerializerSettings JsonSetting = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore };
 
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
@@ -34,7 +35,6 @@ namespace ImageToPlane
             PixelsPerTile = Config.Bind("Scale", "Scale Size", 40);
 
             Debug.Log($"Load Attempt 1:{PhotonUtilPlugin.AddQueue(Guid)}");
-            Debug.Log($"Load Attempt 2:{PhotonUtilPlugin.AddQueue(Guid)}");
             Queue = PhotonUtilPlugin.GetIncomingMessageQueue(Guid);
         }
         
@@ -67,11 +67,12 @@ namespace ImageToPlane
                         rend.material.mainTexture = texture;
                         rend.material.SetTexture("main", texture);
 
+                        var messageContent = JsonConvert.SerializeObject(texture,Formatting.None, JsonSetting);
                         var message = new PhotonMessage
                         {
                             PackageId = Guid,
                             Version = Version,
-                            SerializedMessage = JsonConvert.SerializeObject(texture)
+                            SerializedMessage = messageContent
                         };
                         PhotonUtilPlugin.SendMessage(message);
                     }
