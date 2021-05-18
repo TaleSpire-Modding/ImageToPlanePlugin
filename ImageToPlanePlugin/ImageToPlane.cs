@@ -16,10 +16,11 @@ namespace ImageToPlane
     public class ImageToPlane: BaseUnityPlugin
     {
         const string Guid = "org.hollofox.plugins.imageToPlane";
-        const string Version = "1.0.5.0";
+        const string Version = "1.1.0.0";
         private GameObject cube;
         private ConcurrentQueue<PhotonMessage> Queue;
         private JsonSerializerSettings JsonSetting = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore };
+        private bool Rendered = false;
 
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
@@ -76,9 +77,10 @@ namespace ImageToPlane
                             SerializedMessage = messageContent
                         };
                         PhotonUtilPlugin.SendMessage(message);
+                        Rendered = true;
                     }
                 }
-                else if (Input.GetKey(KeyCode.F2))
+                else if (Input.GetKey(KeyCode.F2) && Rendered)
                 {
                     var t = cube;
                     cube = null;
@@ -90,16 +92,18 @@ namespace ImageToPlane
                         SerializedMessage = "Clear"
                     };
                     PhotonUtilPlugin.SendMessage(message);
+                    Rendered = false;
                 }
                 else
                 {
                     Queue.TryDequeue(out var message);
                     if (message == null) return;
-                    if (message.SerializedMessage == "Clear")
+                    if (message.SerializedMessage == "Clear" && Rendered)
                     {
                         var t = cube;
                         cube = null;
                         if (t != null) Destroy(t);
+                        Rendered = false;
                     }
                     else
                     {
@@ -113,6 +117,7 @@ namespace ImageToPlane
                             0.01f, ((float) texture.height) / PixelsPerTile.Value + 0.01f);
                         rend.material.mainTexture = texture;
                         rend.material.SetTexture("main", texture);
+                        Rendered = true;
                     }
                 }
             }
