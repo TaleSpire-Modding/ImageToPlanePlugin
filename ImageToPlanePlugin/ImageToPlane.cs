@@ -12,7 +12,7 @@ namespace ImageToPlane
     
 
     [BepInPlugin(Guid, "ImageToPlane", Version)]
-    [BepInDependency("org.hollofox.plugins.PhotonUtil", BepInDependency.DependencyFlags.HardDependency)]
+    [BepInDependency("org.hollofox.plugins.PhotonUtil")]
     public class ImageToPlane: BaseUnityPlugin
     {
         private const string Guid = "org.hollofox.plugins.imageToPlane";
