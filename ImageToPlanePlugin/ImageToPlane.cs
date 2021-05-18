@@ -15,8 +15,8 @@ namespace ImageToPlane
     [BepInDependency("org.hollofox.plugins.PhotonUtil", BepInDependency.DependencyFlags.HardDependency)]
     public class ImageToPlane: BaseUnityPlugin
     {
-        const string Guid = "org.hollofox.plugins.imageToPlane";
-        const string Version = "1.1.0.0";
+        private const string Guid = "org.hollofox.plugins.imageToPlane";
+        private const string Version = "1.1.0.0";
         private GameObject cube;
         private ConcurrentQueue<PhotonMessage> Queue;
         private JsonSerializerSettings JsonSetting = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore, TypeNameHandling = TypeNameHandling.None };
