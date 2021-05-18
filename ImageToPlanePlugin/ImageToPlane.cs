@@ -19,7 +19,7 @@ namespace ImageToPlane
         const string Version = "1.1.0.0";
         private GameObject cube;
         private ConcurrentQueue<PhotonMessage> Queue;
-        private JsonSerializerSettings JsonSetting = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore };
+        private JsonSerializerSettings JsonSetting = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore, TypeNameHandling = TypeNameHandling.None };
         private bool Rendered = false;
 
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
@@ -108,7 +108,7 @@ namespace ImageToPlane
                     else
                     {
                         Texture2D texture = new Texture2D(0, 0);
-                        var fileContent = JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage);
+                        var fileContent = JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage,JsonSetting);
                         texture.LoadImage(fileContent);
 
                         if (cube == null) cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
