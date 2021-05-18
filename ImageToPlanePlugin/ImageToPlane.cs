@@ -25,7 +25,7 @@ namespace ImageToPlane
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
         private ConfigEntry<int> PixelsPerTile { get; set; }
-        // Awake is called once when both the game and the plug-in are loaded
+
         void Awake()
         {
             Logger.LogInfo("In Awake for ImageToPlane");
