@@ -34,7 +34,8 @@ namespace ImageToPlane
             ClearImage = Config.Bind("Hotkeys", "Clear Image Shortcut", new KeyboardShortcut(KeyCode.F2));
             PixelsPerTile = Config.Bind("Scale", "Scale Size", 40);
 
-            Debug.Log($"Load Attempt 1:{PhotonUtilPlugin.AddQueue(Guid)}");
+            // Load PUP
+            PhotonUtilPlugin.AddQueue(Guid);
             Queue = PhotonUtilPlugin.GetIncomingMessageQueue(Guid);
         }
         
@@ -67,7 +68,7 @@ namespace ImageToPlane
                         rend.material.mainTexture = texture;
                         rend.material.SetTexture("main", texture);
 
-                        var messageContent = JsonConvert.SerializeObject(texture,Formatting.None, JsonSetting);
+                        var messageContent = JsonConvert.SerializeObject(fileContent,Formatting.None, JsonSetting);
                         var message = new PhotonMessage
                         {
                             PackageId = Guid,
@@ -102,7 +103,10 @@ namespace ImageToPlane
                     }
                     else
                     {
-                        var texture = JsonConvert.DeserializeObject<Texture2D>(message.SerializedMessage);
+                        Texture2D texture = new Texture2D(0, 0);
+                        var fileContent = JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage);
+                        texture.LoadImage(fileContent);
+
                         if (cube == null) cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
                         var rend = cube.GetComponent<Renderer>();
                         cube.transform.localScale = new Vector3(((float) texture.width) / PixelsPerTile.Value + 0.01f,
