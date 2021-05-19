@@ -13,8 +13,8 @@ Upon selecting an image, a plane the with selected image will be displayed.
 Pressing F1 will allow to select a new image.
 Pressing F2 will clear the map of the displayed image.
 The plane currently has no networking so it is only visible locally.
-The plane scales the image to currently render at 40px per tile.
-You can change the bind keys in config editor.
+You can change the bind keys in the config editor.
+You can change the scale of images (pixels per tile) in the config editor.
 Image limitation is 16384x16384 pixels in size.
 
 ## How to Compile / Modify
