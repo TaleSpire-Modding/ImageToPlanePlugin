@@ -4,7 +4,7 @@ This is a plugin for TaleSpire using BepInEx.
 
 ## Install
 
-Go to the releases folder and download the latest and extract to the contents of your TaleSpire game folder.
+Currently you need to either follow the build guide down below or use the R2ModMan. 
 
 ## Usage
 
