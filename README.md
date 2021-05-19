@@ -36,4 +36,4 @@ You will need to add references to:
 
 Build the project.
 
-Browse to the newly created ```bin/Debug``` or ```bin/Release``` folders and copy the ```ImageToPlanePlugin.dll``` to ```Steam\steamapps\common\TaleSpire\BepInEx\plugins```
+Browse to the newly created ```bin/Debug``` or ```bin/Release``` folders and copy the ```ImageToPlanePlugin.dll``` to ```Steam\steamapps\common\TaleSpire\BepInEx\plugins```.
