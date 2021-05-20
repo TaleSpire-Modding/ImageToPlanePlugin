@@ -161,6 +161,7 @@ namespace ImageToPlane
         /// <param name="message">the message</param>
         public void ServerCallback(Socket socket, NetworkMessage message)
         {
+            if (message.TempAuthorId == _playerId) return;
             if (message.SerializedMessage == "Clear" && _rendered) Cleanup();
             else
             {
