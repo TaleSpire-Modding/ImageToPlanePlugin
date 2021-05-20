@@ -1,31 +1,40 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
 using System.IO;
+using System.Net.Sockets;
 using System.Windows.Forms;
 using UnityEngine;
 using BepInEx;
 using BepInEx.Configuration;
-using PhotonUtil;
+using NetworkPlugin;
 using Newtonsoft.Json;
 
 namespace ImageToPlane
 {
-    
 
     [BepInPlugin(Guid, "ImageToPlane", Version)]
-    [BepInDependency("org.hollofox.plugins.PhotonUtil")]
+    [BepInDependency(NetworkUtilPlugin.Guid)]
     public class ImageToPlane: BaseUnityPlugin
     {
+        // constants
         private const string Guid = "org.hollofox.plugins.imageToPlane";
         private const string Version = "1.1.0.0";
+        
+        // Cube based settings
         private GameObject _cube;
-        private ConcurrentQueue<PhotonMessage> _queue;
         private readonly JsonSerializerSettings _jsonSetting = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore, TypeNameHandling = TypeNameHandling.None };
         private bool _rendered = false;
 
+        // Id of player for NUP
+        private Guid _playerId;
+
+        // Configs
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
         private ConfigEntry<int> PixelsPerTile { get; set; }
 
+        /// <summary>
+        /// Awake plugin
+        /// </summary>
         void Awake()
         {
             Logger.LogInfo("In Awake for ImageToPlane");
@@ -35,11 +44,17 @@ namespace ImageToPlane
             ClearImage = Config.Bind("Hotkeys", "Clear Image Shortcut", new KeyboardShortcut(KeyCode.F2));
             PixelsPerTile = Config.Bind("Scale", "Scale Size", 40);
 
-            // Load PUP
-            PhotonUtilPlugin.AddQueue(Guid);
-            _queue = PhotonUtilPlugin.GetIncomingMessageQueue(Guid);
+            // Load NUP
+            NetworkUtilPlugin.AddClientCallback(Guid,ServerCallback);
+            NetworkUtilPlugin.AddServerCallback(Guid,ClientCallback);
+
+            // Get TempAuthorId
+            _playerId = NetworkUtilPlugin.GetAuthorId();
         }
         
+        /// <summary>
+        /// Looping method run by plugin
+        /// </summary>
         void Update()
         {
             try
@@ -54,80 +69,110 @@ namespace ImageToPlane
                     };
                     string path = null;
                     if (dialog.ShowDialog() == DialogResult.OK) path = dialog.FileName;
-                    if (!string.IsNullOrWhiteSpace(path))
-                    {
-                        var fileContent = File.ReadAllBytes(path);
-                        var texture = new Texture2D(0, 0);
-                        texture.LoadImage(fileContent);
+                    if (string.IsNullOrWhiteSpace(path)) return;
+                    
+                    // make map
+                    var fileContent = File.ReadAllBytes(path);
+                    MakeMap(fileContent);
 
-                        if (_cube == null) _cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                        var rend = _cube.GetComponent<Renderer>();
-
-                        _cube.transform.localScale = new Vector3(((float) texture.width) / PixelsPerTile.Value + 0.01f,
-                            0.01f, ((float) texture.height) / PixelsPerTile.Value + 0.01f);
-
-                        rend.material.mainTexture = texture;
-                        rend.material.SetTexture("main", texture);
-
-                        var messageContent = JsonConvert.SerializeObject(fileContent,Formatting.None, _jsonSetting);
-                        var message = new PhotonMessage
-                        {
-                            PackageId = Guid,
-                            Version = Version,
-                            SerializedMessage = messageContent
-                        };
-                        PhotonUtilPlugin.SendMessage(message);
-                        _rendered = true;
-                    }
-                }
-                else if (Input.GetKey(ClearImage.Value.MainKey) && _rendered)
-                {
-                    var t = _cube;
-                    _cube = null;
-                    if (t != null) Destroy(t);
-                    var message = new PhotonMessage
+                    var messageContent = JsonConvert.SerializeObject(fileContent,Formatting.None, _jsonSetting);
+                    var message = new NetworkMessage
                     {
                         PackageId = Guid,
                         Version = Version,
-                        SerializedMessage = "Clear"
+                        SerializedMessage = messageContent,
+                        TempAuthorId = _playerId
                     };
-                    PhotonUtilPlugin.SendMessage(message);
-                    _rendered = false;
+                    SendMessage(message);
                 }
-                else
+                else if (Input.GetKey(ClearImage.Value.MainKey) && _rendered)
                 {
-                    _queue.TryDequeue(out var message);
-                    if (message == null) return;
-                    if (message.SerializedMessage == "Clear" && _rendered)
+                    Cleanup();
+                    var message = new NetworkMessage
                     {
-                        var t = _cube;
-                        _cube = null;
-                        if (t != null) Destroy(t);
-                        _rendered = false;
-                    }
-                    else
-                    {
-                        var texture = new Texture2D(0, 0);
-                        var fileContent = JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage,_jsonSetting);
-                        texture.LoadImage(fileContent);
-
-                        if (_cube == null) _cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                        var rend = _cube.GetComponent<Renderer>();
-                        _cube.transform.localScale = new Vector3(((float) texture.width) / PixelsPerTile.Value + 0.01f,
-                            0.01f, ((float) texture.height) / PixelsPerTile.Value + 0.01f);
-                        rend.material.mainTexture = texture;
-                        rend.material.SetTexture("main", texture);
-                        _rendered = true;
-                    }
+                        PackageId = Guid,
+                        Version = Version,
+                        SerializedMessage = "Clear",
+                        TempAuthorId = _playerId
+                    };
+                    SendMessage(message);
                 }
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 Debug.Log("Crash in Image To Plane Plugin");
                 Debug.Log(ex.Message);
                 Debug.Log(ex.StackTrace);
                 Debug.Log(ex.InnerException);
                 Debug.Log(ex.Source);
+            }
+        }
+
+        /// <summary>
+        /// Sends a network message determined if client or host.
+        /// </summary>
+        /// <param name="message">message being sent</param>
+        private static void SendMessage(NetworkMessage message)
+        {
+            if (NetworkUtilPlugin.IsHost())
+            {
+                NetworkUtilPlugin.ServerSendMessage(message);
+            }
+            else
+            {
+                NetworkUtilPlugin.ClientSendMessage(message);
+            }
+        }
+
+        private void MakeMap(byte[] fileContent)
+        {
+            var texture = new Texture2D(0, 0);
+            texture.LoadImage(fileContent);
+            if (_cube == null) _cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var rend = _cube.GetComponent<Renderer>();
+            _cube.transform.localScale = new Vector3(((float)texture.width) / PixelsPerTile.Value + 0.01f,
+                0.01f, ((float)texture.height) / PixelsPerTile.Value + 0.01f);
+            rend.material.mainTexture = texture;
+            rend.material.SetTexture("main", texture);
+            _rendered = true;
+        }
+
+        private void Cleanup()
+        {
+            var t = _cube;
+            _cube = null;
+            if (t != null) Destroy(t);
+            _rendered = false;
+        }
+
+        /// <summary>
+        /// Code executed when the server receives a message
+        /// </summary>
+        /// <param name="socket">the socket</param>
+        /// <param name="message">the message</param>
+        public void ServerCallback(Socket socket, NetworkMessage message)
+        {
+            if (message.SerializedMessage == "Clear" && _rendered) Cleanup();
+            else
+            {
+                MakeMap(JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage, _jsonSetting));
+            }
+            
+            // re-broadcast to everyone else
+            SendMessage(message);
+        }
+
+        /// <summary>
+        /// Code executed when the client receives a message
+        /// </summary>
+        /// <param name="socket">the socket</param>
+        /// <param name="message">the message</param>
+        public void ClientCallback(Socket socket, NetworkMessage message)
+        {
+            if (message.TempAuthorId == _playerId) return;
+            if (message.SerializedMessage == "Clear" && _rendered) Cleanup();
+            else {
+                MakeMap(JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage, _jsonSetting));
             }
         }
     }
