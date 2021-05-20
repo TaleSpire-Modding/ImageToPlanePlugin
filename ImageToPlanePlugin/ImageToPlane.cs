@@ -61,6 +61,7 @@ namespace ImageToPlane
             {
                 if (Input.GetKey(LoadImage.Value.MainKey))
                 {
+                    // Get Image
                     var dialog = new OpenFileDialog
                     {
                         Filter = "Image Files|*.bmp;*.jpg;*.jpeg;*.png;",
@@ -75,6 +76,7 @@ namespace ImageToPlane
                     var fileContent = File.ReadAllBytes(path);
                     MakeMap(fileContent);
 
+                    // Push to Server / Clients
                     var messageContent = JsonConvert.SerializeObject(fileContent,Formatting.None, _jsonSetting);
                     var message = new NetworkMessage
                     {
@@ -118,12 +120,16 @@ namespace ImageToPlane
             {
                 NetworkUtilPlugin.ServerSendMessage(message);
             }
-            else
+            else if (NetworkUtilPlugin.IsClient())
             {
                 NetworkUtilPlugin.ClientSendMessage(message);
             }
         }
 
+        /// <summary>
+        /// Displays an image
+        /// </summary>
+        /// <param name="fileContent">Makes an image at origin</param>
         private void MakeMap(byte[] fileContent)
         {
             var texture = new Texture2D(0, 0);
@@ -137,6 +143,9 @@ namespace ImageToPlane
             _rendered = true;
         }
 
+        /// <summary>
+        /// Cleans up the image
+        /// </summary>
         private void Cleanup()
         {
             var t = _cube;
