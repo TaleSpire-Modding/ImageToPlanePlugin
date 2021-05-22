@@ -1,18 +1,20 @@
 ﻿using System;
+using System.Text;
+using System.Collections.Generic;
 using System.IO;
-using System.Net.Sockets;
+using System.Linq;
 using System.Windows.Forms;
 using UnityEngine;
 using BepInEx;
 using BepInEx.Configuration;
-using NetworkPlugin;
+using PhotonUtil;
 using Newtonsoft.Json;
 
 namespace ImageToPlane
 {
 
     [BepInPlugin(Guid, "ImageToPlane", Version)]
-    [BepInDependency(NetworkUtilPlugin.Guid)]
+    [BepInDependency(PhotonUtilPlugin.Guid)]
     public class ImageToPlane: BaseUnityPlugin
     {
         // constants
@@ -32,6 +34,13 @@ namespace ImageToPlane
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
         private ConfigEntry<int> PixelsPerTile { get; set; }
 
+        PhotonMessage latest;
+
+        // Track Messages
+        private Dictionary<PhotonPlayer, List<PhotonMessage>> Messages =
+            new Dictionary<PhotonPlayer, List<PhotonMessage>>();
+
+
         /// <summary>
         /// Awake plugin
         /// </summary>
@@ -44,69 +53,120 @@ namespace ImageToPlane
             ClearImage = Config.Bind("Hotkeys", "Clear Image Shortcut", new KeyboardShortcut(KeyCode.F2));
             PixelsPerTile = Config.Bind("Scale", "Scale Size", 40);
 
-            // Load NUP
-            NetworkUtilPlugin.AddClientCallback(Guid,ServerCallback);
-            NetworkUtilPlugin.AddServerCallback(Guid,ClientCallback);
-
-            // Get TempAuthorId
-            _playerId = NetworkUtilPlugin.GetAuthorId();
+            // Load PUP
+            PhotonUtilPlugin.AddMod(Guid);
         }
-        
+
+        private bool OnBoard()
+        {
+            return (CameraController.HasInstance &&
+                    BoardSessionManager.HasInstance &&
+                    BoardSessionManager.HasBoardAndIsInNominalState &&
+                    !BoardSessionManager.IsLoading);
+        }
+
         /// <summary>
         /// Looping method run by plugin
         /// </summary>
         void Update()
         {
-            try
+            if (OnBoard())
             {
-                if (Input.GetKey(LoadImage.Value.MainKey))
+                try
                 {
-                    // Get Image
-                    var dialog = new OpenFileDialog
+                    if (Input.GetKey(LoadImage.Value.MainKey))
                     {
-                        Filter = "Image Files|*.bmp;*.jpg;*.jpeg;*.png;",
-                        InitialDirectory = "C:",
-                        Title = "Select an Image"
-                    };
-                    string path = null;
-                    if (dialog.ShowDialog() == DialogResult.OK) path = dialog.FileName;
-                    if (string.IsNullOrWhiteSpace(path)) return;
-                    
-                    // make map
-                    var fileContent = File.ReadAllBytes(path);
-                    MakeMap(fileContent);
+                        // Get Image
+                        var dialog = new OpenFileDialog
+                        {
+                            Filter = "Image Files|*.bmp;*.jpg;*.jpeg;*.png;",
+                            InitialDirectory = "C:",
+                            Title = "Select an Image"
+                        };
+                        string path = null;
+                        if (dialog.ShowDialog() == DialogResult.OK) path = dialog.FileName;
+                        if (string.IsNullOrWhiteSpace(path)) return;
 
-                    // Push to Server / Clients
-                    var messageContent = JsonConvert.SerializeObject(fileContent,Formatting.None, _jsonSetting);
-                    var message = new NetworkMessage
+                        // make map
+                        var fileContent = File.ReadAllBytes(path);
+                        MakeMap(fileContent);
+
+                        // Push to Server / Clients
+                        ClearMessage();
+                        var intarray = fileContent.Select(t => (int) t).ToList();
+                        var messageContent = JsonConvert.SerializeObject(intarray);
+
+                        var message = new PhotonMessage
+                        {
+                            PackageId = Guid,
+                            Version = Version,
+                            SerializedMessage = messageContent,
+                        };
+
+                        SendMessage(message);
+                    }
+                    else if (Input.GetKey(ClearImage.Value.MainKey) && _rendered)
                     {
-                        PackageId = Guid,
-                        Version = Version,
-                        SerializedMessage = messageContent,
-                        TempAuthorId = _playerId
-                    };
-                    SendMessage(message);
+                        Cleanup();
+                        ClearMessage();
+                        var message = new PhotonMessage
+                        {
+                            PackageId = Guid,
+                            Version = Version,
+                            SerializedMessage = "Clear"
+                        };
+                        SendMessage(message);
+                    }
+                    
+                    // Now we check for incoming messages
+                    var messages = PhotonUtilPlugin.GetMessages(Guid);
+
+                    var newM = false;
+
+                    foreach (var m in messages.SelectMany(player => player.Value))
+                    {
+                        if (latest == null)
+                        {
+                            latest = m;
+                            newM = true;
+                        }
+                        else if (latest.Created < m.Created)
+                        {
+                            latest = m;
+                            newM = true;
+                        }
+                    }
+
+                    if (latest != null && newM)
+                    {
+                        Debug.Log(latest.SerializedMessage);
+
+                        if (latest.Author != PhotonUtilPlugin.GetAuthor())
+                        {
+                            if (latest.SerializedMessage == "Clear")
+                            {
+                                Cleanup();
+                            }
+                            else
+                            {
+                                var intArray = JsonConvert.DeserializeObject<List<int>>(latest.SerializedMessage);
+                                byte[] SerializedMessage = intArray.Select(i => (byte) i).ToArray();
+                                MakeMap(SerializedMessage);
+                            }
+                        }
+                    }
+
+                    Messages = messages;
+
                 }
-                else if (Input.GetKey(ClearImage.Value.MainKey) && _rendered)
+                catch (Exception ex)
                 {
-                    Cleanup();
-                    var message = new NetworkMessage
-                    {
-                        PackageId = Guid,
-                        Version = Version,
-                        SerializedMessage = "Clear",
-                        TempAuthorId = _playerId
-                    };
-                    SendMessage(message);
+                    Debug.Log("Crash in Image To Plane Plugin");
+                    Debug.Log(ex.Message);
+                    Debug.Log(ex.StackTrace);
+                    Debug.Log(ex.InnerException);
+                    Debug.Log(ex.Source);
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.Log("Crash in Image To Plane Plugin");
-                Debug.Log(ex.Message);
-                Debug.Log(ex.StackTrace);
-                Debug.Log(ex.InnerException);
-                Debug.Log(ex.Source);
             }
         }
 
@@ -114,16 +174,19 @@ namespace ImageToPlane
         /// Sends a network message determined if client or host.
         /// </summary>
         /// <param name="message">message being sent</param>
-        private static void SendMessage(NetworkMessage message)
+        private static void SendMessage(PhotonMessage message)
         {
-            if (NetworkUtilPlugin.IsHost())
-            {
-                NetworkUtilPlugin.ServerSendMessage(message);
-            }
-            else if (NetworkUtilPlugin.IsClient())
-            {
-                NetworkUtilPlugin.ClientSendMessage(message);
-            }
+            Debug.Log(message.SerializedMessage);
+            PhotonUtilPlugin.AddMessage(Guid,message);
+        }
+
+        /// <summary>
+        /// Sends a network message determined if client or host.
+        /// </summary>
+        /// <param name="message">message being sent</param>
+        private static void ClearMessage()
+        {
+            PhotonUtilPlugin.ClearNonPersistent(Guid);
         }
 
         /// <summary>
@@ -152,38 +215,6 @@ namespace ImageToPlane
             _cube = null;
             if (t != null) Destroy(t);
             _rendered = false;
-        }
-
-        /// <summary>
-        /// Code executed when the server receives a message
-        /// </summary>
-        /// <param name="socket">the socket</param>
-        /// <param name="message">the message</param>
-        public void ServerCallback(Socket socket, NetworkMessage message)
-        {
-            if (message.TempAuthorId == _playerId) return;
-            if (message.SerializedMessage == "Clear" && _rendered) Cleanup();
-            else
-            {
-                MakeMap(JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage, _jsonSetting));
-            }
-            
-            // re-broadcast to everyone else
-            SendMessage(message);
-        }
-
-        /// <summary>
-        /// Code executed when the client receives a message
-        /// </summary>
-        /// <param name="socket">the socket</param>
-        /// <param name="message">the message</param>
-        public void ClientCallback(Socket socket, NetworkMessage message)
-        {
-            if (message.TempAuthorId == _playerId) return;
-            if (message.SerializedMessage == "Clear" && _rendered) Cleanup();
-            else {
-                MakeMap(JsonConvert.DeserializeObject<byte[]>(message.SerializedMessage, _jsonSetting));
-            }
         }
     }
 }
