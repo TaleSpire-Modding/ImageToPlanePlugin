@@ -58,6 +58,7 @@ namespace ImageToPlane
             PixelsPerTile = Config.Bind("Scale", "Scale Size", 40);
 
             // Load PUP
+            ModdingTales.ModdingUtils.Initialize(this, Logger);
             PhotonUtilPlugin.AddMod(Guid);
         }
 
