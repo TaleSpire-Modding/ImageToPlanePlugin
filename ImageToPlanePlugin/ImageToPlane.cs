@@ -9,6 +9,10 @@ using BepInEx;
 using BepInEx.Configuration;
 using PhotonUtil;
 using Newtonsoft.Json;
+using UnityEngine.Networking;
+using System.Collections;
+using System.Net.Mime;
+using SRF;
 
 namespace ImageToPlane
 {
@@ -19,7 +23,7 @@ namespace ImageToPlane
     {
         // constants
         private const string Guid = "org.hollofox.plugins.imageToPlane";
-        private const string Version = "1.1.0.0";
+        private const string Version = "2.0.0.0";
         
         // Cube based settings
         private GameObject _cube;
@@ -65,6 +69,9 @@ namespace ImageToPlane
                     !BoardSessionManager.IsLoading);
         }
 
+        private readonly TimeSpan _fetchTimeSpan = TimeSpan.FromSeconds(1);
+        private DateTime _lastChecked = DateTime.Now;
+
         /// <summary>
         /// Looping method run by plugin
         /// </summary>
@@ -76,34 +83,38 @@ namespace ImageToPlane
                 {
                     if (Input.GetKey(LoadImage.Value.MainKey))
                     {
-                        // Get Image
-                        var dialog = new OpenFileDialog
+                        SystemMessage.AskForTextInput("Board URL", "Enter the URL to your map (PNG or JPG Image Only)", "OK", delegate (string mediaUrl)
                         {
-                            Filter = "Image Files|*.bmp;*.jpg;*.jpeg;*.png;",
-                            InitialDirectory = "C:",
-                            Title = "Select an Image"
-                        };
-                        string path = null;
-                        if (dialog.ShowDialog() == DialogResult.OK) path = dialog.FileName;
-                        if (string.IsNullOrWhiteSpace(path)) return;
-
-                        // make map
-                        var fileContent = File.ReadAllBytes(path);
-                        MakeMap(fileContent);
-
-                        // Push to Server / Clients
-                        ClearMessage();
-                        var intarray = fileContent.Select(t => (int) t).ToList();
-                        var messageContent = JsonConvert.SerializeObject(intarray);
-
-                        var message = new PhotonMessage
+                            if (mediaUrl.Length > 256)
+                            {
+                            }
+                            else
+                            {
+                                PhotonUtilPlugin.AddMessage(new PhotonMessage
+                                {
+                                    PackageId = Guid,
+                                    SerializedMessage = mediaUrl,
+                                    Version = Version,
+                                });
+                            }
+                        }, delegate
                         {
-                            PackageId = Guid,
-                            Version = Version,
-                            SerializedMessage = messageContent,
-                        };
+                        }, "Open Board Locally Instead", delegate
+                        {
+                            var dialog = new OpenFileDialog
+                            {
+                                Filter = "Image Files|*.bmp;*.jpg;*.jpeg;*.png;",
+                                InitialDirectory = "C:",
+                                Title = "Select an Image"
+                            };
+                            string path = null;
+                            if (dialog.ShowDialog() == DialogResult.OK) path = dialog.FileName;
+                            if (string.IsNullOrWhiteSpace(path)) return;
 
-                        SendMessage(message);
+                            // make map
+                            var fileContent = File.ReadAllBytes(path);
+                            MakeMap(fileContent);
+                        });
                     }
                     else if (Input.GetKey(ClearImage.Value.MainKey) && _rendered)
                     {
@@ -115,49 +126,22 @@ namespace ImageToPlane
                             Version = Version,
                             SerializedMessage = "Clear"
                         };
-                        SendMessage(message);
+                        PhotonUtilPlugin.AddMessage(message);
                     }
-                    
-                    // Now we check for incoming messages
-                    var messages = PhotonUtilPlugin.GetMessages(Guid);
-
-                    var newM = false;
-
-                    foreach (var m in messages.SelectMany(player => player.Value))
+                    else if (DateTime.Now - _lastChecked > _fetchTimeSpan)
                     {
-                        if (latest == null)
+                        _lastChecked = DateTime.Now;
+                        var messages = PhotonUtilPlugin.GetNewMessages(Guid);
+                        foreach (var message in from m in messages.Values from message in m where message != null && !message.Viewed select message)
                         {
-                            latest = m;
-                            newM = true;
+                            StartCoroutine(DownloadImage(message.SerializedMessage));
                         }
-                        else if (latest.Created < m.Created)
-                        {
-                            latest = m;
-                            newM = true;
-                        }
-                    }
-
-                    if (latest != null && newM)
+                    } 
+                    else if (load)
                     {
-                        Debug.Log(latest.SerializedMessage);
-
-                        if (latest.Author != PhotonUtilPlugin.GetAuthor())
-                        {
-                            if (latest.SerializedMessage == "Clear")
-                            {
-                                Cleanup();
-                            }
-                            else
-                            {
-                                var intArray = JsonConvert.DeserializeObject<List<int>>(latest.SerializedMessage);
-                                byte[] SerializedMessage = intArray.Select(i => (byte) i).ToArray();
-                                MakeMap(SerializedMessage);
-                            }
-                        }
+                        MakeMap(BufferTexture);
+                        load = false;
                     }
-
-                    Messages = messages;
-
                 }
                 catch (Exception ex)
                 {
@@ -169,34 +153,48 @@ namespace ImageToPlane
                 }
             }
         }
-
-        /// <summary>
-        /// Sends a network message determined if client or host.
-        /// </summary>
-        /// <param name="message">message being sent</param>
-        private static void SendMessage(PhotonMessage message)
-        {
-            Debug.Log(message.SerializedMessage);
-            PhotonUtilPlugin.AddMessage(Guid,message);
-        }
-
-        /// <summary>
-        /// Sends a network message determined if client or host.
-        /// </summary>
-        /// <param name="message">message being sent</param>
+        
         private static void ClearMessage()
         {
             PhotonUtilPlugin.ClearNonPersistent(Guid);
         }
 
+        private static bool load = false;
+        private static Texture2D BufferTexture = null;
+
+        IEnumerator DownloadImage(string MediaUrl)
+        {
+            using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(MediaUrl))
+            {
+                yield return request.SendWebRequest();
+                if (request.isNetworkError || request.isHttpError)
+                    Debug.Log(request.error);
+                else
+                {
+                    Debug.Log("Downloaded!");
+                    BufferTexture = ((DownloadHandlerTexture)request.downloadHandler).texture;
+                    load = true;
+                }
+            }
+        }
+
         /// <summary>
         /// Displays an image
         /// </summary>
-        /// <param name="fileContent">Makes an image at origin</param>
+        /// <param name="fileContent">Byte array from a read file</param>
         private void MakeMap(byte[] fileContent)
         {
             var texture = new Texture2D(0, 0);
             texture.LoadImage(fileContent);
+            MakeMap(texture);
+        }
+
+        /// <summary>
+        /// Displays an image
+        /// </summary>
+        /// <param name="texture">Texture generated from previous makemap</param>
+        private void MakeMap(Texture2D texture)
+        {
             if (_cube == null) _cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             var rend = _cube.GetComponent<Renderer>();
             _cube.transform.localScale = new Vector3(((float)texture.width) / PixelsPerTile.Value + 0.01f,
@@ -204,6 +202,7 @@ namespace ImageToPlane
             rend.material.mainTexture = texture;
             rend.material.SetTexture("main", texture);
             _rendered = true;
+            load = false;
         }
 
         /// <summary>
