@@ -620,15 +620,6 @@ namespace ModdingTales
             }
         }
 
-        private static void UpdateBoardLoad()
-        {
-            if (boardsToLoad.Count > 0)
-            {
-                BoardInfo bi = boardsToLoad.Dequeue();
-                SingletonBehaviour<BoardSaverManager>.Instance.Load(bi);
-            }
-        }
-
         public static Slab GetSelectedSlab()
         {
             try
