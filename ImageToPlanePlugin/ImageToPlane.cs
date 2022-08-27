@@ -36,9 +36,8 @@ namespace ImageToPlane
         // Id of player for NUP
         private Guid _playerId;
 
-
-        private static ConfigEntry<ModdingUtils.LogLevel> LogLevelConfig { get; set; }
         // Configs
+        private static ConfigEntry<ModdingUtils.LogLevel> LogLevelConfig { get; set; }
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
         private ConfigEntry<KeyboardShortcut> MoveImage { get; set; }
