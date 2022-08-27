@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Reflection;
-using System.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,22 +10,20 @@ using PhotonUtil;
 using Newtonsoft.Json;
 using UnityEngine.Networking;
 using System.Collections;
-using System.Net.Mime;
-using System.Xml.Schema;
-using DataModel;
-using HarmonyLib;
-using SRF;
+using ModdingTales;
+using PluginUtilities;
 
 namespace ImageToPlane
 {
 
     [BepInPlugin(Guid, "ImageToPlane", Version)]
     [BepInDependency(PhotonUtilPlugin.Guid)]
+    [BepInDependency(SetInjectionFlag.Guid)]
     public class ImageToPlane : BaseUnityPlugin
     {
         // constants
         private const string Guid = "org.hollofox.plugins.imageToPlane";
-        private const string Version = "2.1.1.0";
+        private const string Version = "2.2.1.0";
 
         // Cube based settings
         private GameObject _cube;
@@ -40,6 +36,8 @@ namespace ImageToPlane
         // Id of player for NUP
         private Guid _playerId;
 
+
+        private static ConfigEntry<ModdingUtils.LogLevel> LogLevelConfig { get; set; }
         // Configs
         private ConfigEntry<KeyboardShortcut> LoadImage { get; set; }
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
@@ -52,23 +50,44 @@ namespace ImageToPlane
         private Dictionary<PhotonPlayer, List<PhotonMessage>> Messages =
             new Dictionary<PhotonPlayer, List<PhotonMessage>>();
 
+        private static ModdingUtils.LogLevel LogLevel => LogLevelConfig.Value == ModdingUtils.LogLevel.Inherited ? ModdingUtils.LogLevelConfig.Value : LogLevelConfig.Value;
 
         /// <summary>
         /// Awake plugin
         /// </summary>
         void Awake()
         {
-            Logger.LogInfo("In Awake for ImageToPlane");
-
-            Debug.Log("ImageToPlane Plug-in loaded");
-            LoadImage = Config.Bind("Hotkeys", "Load Image Shortcut", new KeyboardShortcut(KeyCode.F1));
-            ClearImage = Config.Bind("Hotkeys", "Clear Image Shortcut", new KeyboardShortcut(KeyCode.F2));
-            MoveImage = Config.Bind("Hotkeys", "Move Image Shortcut", new KeyboardShortcut(KeyCode.F3));
-            PixelsPerTile = Config.Bind("Scale", "Scale Size", 40);
+            DoConfig(Config);
 
             // Load PUP
-            ModdingTales.ModdingUtils.Initialize(this, Logger);
+            ModdingUtils.Initialize(this, Logger);
             PhotonUtilPlugin.AddMod(Guid);
+
+            if (LogLevel > ModdingUtils.LogLevel.None)
+                Logger.LogInfo("ImageToPlane Plug-in loaded");
+        }
+
+        private void DoConfig(ConfigFile config)
+        {
+            if (LogLevel > ModdingUtils.LogLevel.None)
+                Logger.LogInfo("In Awake for ImageToPlane");
+
+            // Descriptions for configs
+            var logLevelDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes { IsAdvanced = true });
+            var loadImageDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
+            var clearImageDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
+            var moveImageDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
+            var pixelsPerTileDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
+
+            // Actual Configs
+            LogLevelConfig = config.Bind("Logging", "Log Level", ModdingUtils.LogLevel.Inherited, logLevelDescription);
+            LoadImage = config.Bind("Hotkeys", "Load Image Shortcut", new KeyboardShortcut(KeyCode.F1),loadImageDescription);
+            ClearImage = config.Bind("Hotkeys", "Clear Image Shortcut", new KeyboardShortcut(KeyCode.F2),clearImageDescription);
+            MoveImage = config.Bind("Hotkeys", "Move Image Shortcut", new KeyboardShortcut(KeyCode.F3),moveImageDescription);
+            PixelsPerTile = config.Bind("Scale", "Scale Size", 40,pixelsPerTileDescription);
+
+            if (LogLevel >= ModdingUtils.LogLevel.Low)
+                Logger.LogInfo("Config Bound");
         }
 
         private bool OnBoard()
@@ -81,7 +100,6 @@ namespace ImageToPlane
 
         private readonly TimeSpan _fetchTimeSpan = TimeSpan.FromSeconds(1);
         private DateTime _lastChecked = DateTime.Now;
-
 
         private List<Vector4> movement = new List<Vector4>();
         private bool isMoving;
@@ -179,11 +197,11 @@ namespace ImageToPlane
                 }
                 catch (Exception ex)
                 {
-                    Debug.Log("Crash in Image To Plane Plugin");
-                    Debug.Log(ex.Message);
-                    Debug.Log(ex.StackTrace);
-                    Debug.Log(ex.InnerException);
-                    Debug.Log(ex.Source);
+                    Logger.LogError("Crash in Image To Plane Plugin");
+                    Logger.LogError(ex.Message);
+                    Logger.LogError(ex.StackTrace);
+                    Logger.LogError(ex.InnerException);
+                    Logger.LogError(ex.Source);
                 }
             }
 
@@ -198,15 +216,18 @@ namespace ImageToPlane
 
         internal IEnumerator moveObject(GameObject o, Vector3 move, float totalMovementTime)
         {
-            Debug.Log("ITP Moving cube");
+            if (LogLevel >= ModdingUtils.LogLevel.Medium)
+                Logger.LogInfo("ITP Moving cube");
             isMoving = true;
             var origin = o.transform.localPosition;
             Vector3 destination = origin + move;
-            Debug.Log($"dest:[{destination.x},{destination.y},{destination.z}]");
+            if (LogLevel >= ModdingUtils.LogLevel.High)
+                Logger.LogInfo($"dest:[{destination.x},{destination.y},{destination.z}]");
             float currentMovementTime = 0f;//The amount of time that has passed
             while (Vector3.Distance(o.transform.localPosition, destination) > 0)
             {
-                Debug.Log("ITP Moving cube Loop");
+                if (LogLevel == ModdingUtils.LogLevel.All)
+                    Logger.LogInfo("ITP Moving cube Loop");
                 currentMovementTime += Time.deltaTime;
                 o.transform.localPosition = Vector3.Lerp(origin, destination, currentMovementTime / totalMovementTime);
                 yield return null;
@@ -234,10 +255,11 @@ namespace ImageToPlane
             {
                 yield return request.SendWebRequest();
                 if (request.isNetworkError || request.isHttpError)
-                    Debug.Log(request.error);
+                    Logger.LogError(request.error);
                 else
                 {
-                    Debug.Log("Downloaded!");
+                    if (LogLevel == ModdingUtils.LogLevel.All)
+                        Logger.LogInfo("Downloaded!");
                     BufferTexture = ((DownloadHandlerTexture) request.downloadHandler).texture;
                     load = true;
                 }
@@ -281,7 +303,8 @@ namespace ImageToPlane
             if (t != null) Destroy(t);
             _rendered = false;
 
-            Debug.Log(JsonConvert.SerializeObject(CampaignSessionManager.StatNames));
+            if (LogLevel >= ModdingUtils.LogLevel.High)
+                Logger.LogInfo(JsonConvert.SerializeObject(CampaignSessionManager.StatNames));
         }
     }
 }
