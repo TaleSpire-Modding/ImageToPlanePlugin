@@ -7,31 +7,29 @@ using UnityEngine;
 using BepInEx;
 using BepInEx.Configuration;
 using PhotonUtil;
-using Newtonsoft.Json;
 using UnityEngine.Networking;
 using System.Collections;
 using ModdingTales;
 using PluginUtilities;
+using SRF;
+using UnityEngine.Video;
 
 namespace ImageToPlane
 {
 
-    [BepInPlugin(Guid, "ImageToPlane", Version)]
+    [BepInPlugin(Guid, "HolloFoxes' ImageToPlane Plugin", Version)]
     [BepInDependency(PhotonUtilPlugin.Guid)]
     [BepInDependency(SetInjectionFlag.Guid)]
     public class ImageToPlane : BaseUnityPlugin
     {
         // constants
         private const string Guid = "org.hollofox.plugins.imageToPlane";
-        private const string Version = "2.2.1.0";
+        private const string Version = "2.3.0.0";
 
         // Cube based settings
         private GameObject _cube;
 
-        private readonly JsonSerializerSettings _jsonSetting = new JsonSerializerSettings
-            {ReferenceLoopHandling = ReferenceLoopHandling.Ignore, TypeNameHandling = TypeNameHandling.None};
-
-        private bool _rendered = false;
+        private bool _rendered;
 
         // Id of player for NUP
         private Guid _playerId;
@@ -42,6 +40,9 @@ namespace ImageToPlane
         private ConfigEntry<KeyboardShortcut> ClearImage { get; set; }
         private ConfigEntry<KeyboardShortcut> MoveImage { get; set; }
         private ConfigEntry<int> PixelsPerTile { get; set; }
+        
+        private ConfigEntry<float> TilesWide { get; set; }
+        private ConfigEntry<float> TilesLong { get; set; }
 
         PhotonMessage latest;
 
@@ -57,7 +58,7 @@ namespace ImageToPlane
         void Awake()
         {
             DoConfig(Config);
-
+            
             // Load PUP
             ModdingUtils.Initialize(this, Logger);
             PhotonUtilPlugin.AddMod(Guid);
@@ -68,22 +69,29 @@ namespace ImageToPlane
 
         private void DoConfig(ConfigFile config)
         {
-            if (LogLevel > ModdingUtils.LogLevel.None)
-                Logger.LogInfo("In Awake for ImageToPlane");
-
             // Descriptions for configs
-            var logLevelDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes { IsAdvanced = true });
-            var loadImageDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
-            var clearImageDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
-            var moveImageDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
-            var pixelsPerTileDescription = new ConfigDescription("", null, new ConfigurationManagerAttributes());
+            var logLevelDescription = new ConfigDescription("logging level, inherited determined by setinjectionflag", null, new ConfigurationManagerAttributes { IsAdvanced = true });
+            var loadImageDescription = new ConfigDescription("keybind to spawn plane", null, new ConfigurationManagerAttributes());
+            var clearImageDescription = new ConfigDescription("keybind to remove plane", null, new ConfigurationManagerAttributes());
+            var moveImageDescription = new ConfigDescription("keybind to move plane", null, new ConfigurationManagerAttributes());
+            var pixelsPerTileDescription = new ConfigDescription("pixel resolution per tile", null, new ConfigurationManagerAttributes { CallbackAction = AdjustMapSize });
+            var videoSizeDescription = new ConfigDescription("Tile Dimension for Video", null, new ConfigurationManagerAttributes { CallbackAction = AdjustVideoSize});
 
             // Actual Configs
             LogLevelConfig = config.Bind("Logging", "Log Level", ModdingUtils.LogLevel.Inherited, logLevelDescription);
+
+            if (LogLevel > ModdingUtils.LogLevel.None)
+                Logger.LogInfo("In Awake for ImageToPlane");
+
+            // KeyBinds
             LoadImage = config.Bind("Hotkeys", "Load Image Shortcut", new KeyboardShortcut(KeyCode.F1),loadImageDescription);
             ClearImage = config.Bind("Hotkeys", "Clear Image Shortcut", new KeyboardShortcut(KeyCode.F2),clearImageDescription);
             MoveImage = config.Bind("Hotkeys", "Move Image Shortcut", new KeyboardShortcut(KeyCode.F3),moveImageDescription);
+            
+            // Plane Resolution
             PixelsPerTile = config.Bind("Scale", "Scale Size", 40,pixelsPerTileDescription);
+            TilesWide = config.Bind("Video", "Tiles Wide", 19.20f * 5, videoSizeDescription);
+            TilesLong = config.Bind("Video", "Tiles High", 10.80f * 5, videoSizeDescription);
 
             if (LogLevel >= ModdingUtils.LogLevel.Low)
                 Logger.LogInfo("Config Bound");
@@ -115,11 +123,13 @@ namespace ImageToPlane
 
                     if (Input.GetKey(LoadImage.Value.MainKey))
                     {
-                        SystemMessage.AskForTextInput("Board URL", "Enter the URL to your map (PNG or JPG Image Only)",
+                        SystemMessage.AskForTextInput("Media URI", "Enter the URI to your media",
                             "OK", delegate(string mediaUrl)
                             {
                                 if (mediaUrl.Length > 256)
                                 {
+                                    if (LogLevel > ModdingUtils.LogLevel.None)
+                                        Logger.LogWarning($"Media URL is too long: {mediaUrl}");
                                 }
                                 else
                                 {
@@ -134,17 +144,22 @@ namespace ImageToPlane
                             {
                                 var dialog = new OpenFileDialog
                                 {
-                                    Filter = "Image Files|*.bmp;*.jpg;*.jpeg;*.png;",
+                                    Filter = "Image Files|*.bmp;*.jpg;*.jpeg;*.png;|Video Files (*.*)|*.mp4;*.mov;*.webm;*.wmv;|All Files (*.*)|*.*",
                                     InitialDirectory = "C:",
-                                    Title = "Select an Image"
+                                    Title = "Select Media"
                                 };
                                 string path = null;
                                 if (dialog.ShowDialog() == DialogResult.OK) path = dialog.FileName;
-                                if (string.IsNullOrWhiteSpace(path)) return;
+                                if (LogLevel == ModdingUtils.LogLevel.All)
+                                    Logger.LogDebug(path);
 
-                                // make map
-                                var fileContent = File.ReadAllBytes(path);
-                                MakeMap(fileContent);
+                                if (string.IsNullOrWhiteSpace(path)) return;
+                                
+                                // Make Map
+                                if (path.EndsWith(".mp4") || path.EndsWith(".mov;") || path.EndsWith(".webm;") || path.EndsWith(".wmv;") )
+                                    MakeMap(path);
+                                else
+                                    MakeMap(File.ReadAllBytes(path));
                             });
                     }
                     else if (Input.GetKey(ClearImage.Value.MainKey) && _rendered)
@@ -171,15 +186,15 @@ namespace ImageToPlane
                             StartCoroutine(DownloadImage(message.SerializedMessage));
                         }
                     }
-                    else if (load)
+                    else if (_load)
                     {
-                        MakeMap(BufferTexture);
-                        load = false;
+                        MakeMap(_bufferTexture);
+                        _load = false;
                     }
 
                     if (Input.GetKey(MoveImage.Value.MainKey))
                     {
-                        SystemMessage.AskForTextInput("Tween Image", "Enter the movement e.g. [x,y,z,t] => [1,1,1,1]",
+                        SystemMessage.AskForTextInput("Tween Plane", "Enter the movement e.g. [x,y,z,t] => [1,1,1,1]",
                             "OK", delegate (string tween)
                             {
                                 var cull = tween.Replace("[", "").Replace("]", "").Split(',');
@@ -204,13 +219,11 @@ namespace ImageToPlane
                 }
             }
 
-            if (!isMoving && _cube != null && movement.Any())
-            {
-                var move = new Vector3(movement[0].x, movement[0].y, movement[0].z);
-                var time = movement[0].w;
-                StartCoroutine(moveObject(_cube,move,time));
-                movement.RemoveAt(0);
-            }
+            if (isMoving || _cube == null || movement.Count == 0) return;
+            var move = new Vector3(movement[0].x, movement[0].y, movement[0].z);
+            var time = movement[0].w;
+            StartCoroutine(moveObject(_cube,move,time));
+            movement.RemoveAt(0);
         }
 
         internal IEnumerator moveObject(GameObject o, Vector3 move, float totalMovementTime)
@@ -219,10 +232,10 @@ namespace ImageToPlane
                 Logger.LogInfo("ITP Moving cube");
             isMoving = true;
             var origin = o.transform.localPosition;
-            Vector3 destination = origin + move;
+            var destination = origin + move;
             if (LogLevel >= ModdingUtils.LogLevel.High)
                 Logger.LogInfo($"dest:[{destination.x},{destination.y},{destination.z}]");
-            float currentMovementTime = 0f;//The amount of time that has passed
+            var currentMovementTime = 0f;//The amount of time that has passed
             while (Vector3.Distance(o.transform.localPosition, destination) > 0)
             {
                 if (LogLevel == ModdingUtils.LogLevel.All)
@@ -240,27 +253,32 @@ namespace ImageToPlane
             PhotonUtilPlugin.ClearNonPersistent(Guid);
         }
 
-        private static bool load = false;
-        private static Texture2D BufferTexture = null;
+        private static bool _load;
+        private static Texture2D _bufferTexture;
 
         /// <summary>
         /// Downloads an image to a Texture
         /// </summary>
-        /// <param name="MediaUrl">URL of the image</param>
+        /// <param name="mediaUrl">URL of the image</param>
         /// <returns></returns>
-        IEnumerator DownloadImage(string MediaUrl)
+        IEnumerator DownloadImage(string mediaUrl)
         {
-            using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(MediaUrl))
+            if (mediaUrl.EndsWith(".mp4") || mediaUrl.EndsWith(".mov;") || mediaUrl.EndsWith(".webm;") || mediaUrl.EndsWith(".wmv;")) 
+                MakeMap(mediaUrl);
+            else
             {
-                yield return request.SendWebRequest();
-                if (request.isNetworkError || request.isHttpError)
-                    Logger.LogError(request.error);
-                else
+                using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(mediaUrl))
                 {
-                    if (LogLevel == ModdingUtils.LogLevel.All)
-                        Logger.LogInfo("Downloaded!");
-                    BufferTexture = ((DownloadHandlerTexture) request.downloadHandler).texture;
-                    load = true;
+                    yield return request.SendWebRequest();
+                    if (request.isNetworkError || request.isHttpError)
+                        Logger.LogError(request.error);
+                    else
+                    {
+                        if (LogLevel == ModdingUtils.LogLevel.All)
+                            Logger.LogInfo("Downloaded!");
+                        _bufferTexture = ((DownloadHandlerTexture)request.downloadHandler).texture;
+                        _load = true;
+                    }
                 }
             }
         }
@@ -276,6 +294,44 @@ namespace ImageToPlane
             MakeMap(texture);
         }
 
+        private void AdjustVideoSize(object o)
+        {
+            if (_cube == null || !_cube.TryGetComponent(out VideoPlayer _)) return;
+            _cube.transform.localScale = new Vector3(TilesWide.Value + 0.01f, 0.01f, TilesLong.Value + 0.01f);
+        }
+
+        private void AdjustMapSize(object o)
+        {
+            if (_cube == null || _cube.TryGetComponent(out VideoPlayer _)) return;
+            var rend = _cube.GetComponent<Renderer>();
+            var texture = rend.material.mainTexture;
+            _cube.transform.localScale = new Vector3(((float)texture.width) / PixelsPerTile.Value + 0.01f,
+                0.01f, ((float)texture.height) / PixelsPerTile.Value + 0.01f);
+        }
+
+        /// <summary>
+        /// Displays an image
+        /// </summary>
+        /// <param name="uri">location of video</param>
+        internal void MakeMap(string uri)
+        {
+            if (_cube == null) _cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            
+            if (!_cube.TryGetComponent(out VideoPlayer p))
+                p = _cube.AddComponent<VideoPlayer>();
+
+            p.playOnAwake = true;
+            p.source = VideoSource.Url;
+            if (!uri.StartsWith("http"))
+                uri = "file://" + uri;
+            p.url = uri;
+            p.isLooping = true;
+
+            AdjustVideoSize(null);
+            _rendered = true;
+            _load = false;
+        }
+
         /// <summary>
         /// Displays an image
         /// </summary>
@@ -283,13 +339,14 @@ namespace ImageToPlane
         private void MakeMap(Texture2D texture)
         {
             if (_cube == null) _cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            _cube.RemoveComponentIfExists<VideoPlayer>();
+
             var rend = _cube.GetComponent<Renderer>();
-            _cube.transform.localScale = new Vector3(((float) texture.width) / PixelsPerTile.Value + 0.01f,
-                0.01f, ((float) texture.height) / PixelsPerTile.Value + 0.01f);
             rend.material.mainTexture = texture;
             rend.material.SetTexture("main", texture);
+            AdjustMapSize(null);
             _rendered = true;
-            load = false;
+            _load = false;
         }
 
         /// <summary>
@@ -301,9 +358,6 @@ namespace ImageToPlane
             _cube = null;
             if (t != null) Destroy(t);
             _rendered = false;
-
-            if (LogLevel >= ModdingUtils.LogLevel.High)
-                Logger.LogInfo(JsonConvert.SerializeObject(CampaignSessionManager.StatNames));
         }
     }
 }
