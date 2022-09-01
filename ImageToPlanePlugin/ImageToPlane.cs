@@ -24,7 +24,7 @@ namespace ImageToPlane
     {
         // constants
         private const string Guid = "org.hollofox.plugins.imageToPlane";
-        private const string Version = "2.3.0.0";
+        private const string Version = "2.3.1.0";
 
         // Cube based settings
         private GameObject _cube;
@@ -90,8 +90,8 @@ namespace ImageToPlane
             
             // Plane Resolution
             PixelsPerTile = config.Bind("Scale", "Scale Size", 40,pixelsPerTileDescription);
-            TilesWide = config.Bind("Video", "Tiles Wide", 19.20f * 5, videoSizeDescription);
-            TilesLong = config.Bind("Video", "Tiles High", 10.80f * 5, videoSizeDescription);
+            TilesWide = config.Bind("Video", "Tiles Wide", 32f, videoSizeDescription);
+            TilesLong = config.Bind("Video", "Tiles High", 18f, videoSizeDescription);
 
             if (LogLevel >= ModdingUtils.LogLevel.Low)
                 Logger.LogInfo("Config Bound");
@@ -328,6 +328,30 @@ namespace ImageToPlane
             p.isLooping = true;
 
             AdjustVideoSize(null);
+
+            if (true)
+            {
+
+                _cube.layer = 16;
+
+                //var renderer = _cube.GetComponent<Renderer>();
+
+                /*
+                var props = renderer.material.GetTexturePropertyNames();
+                foreach (var prop in props)
+                {
+                    Logger.LogInfo("found property: " + prop);
+                }
+
+                p.targetMaterialRenderer = renderer;
+
+                
+                // renderer.material.SetColor("_Color", Color.black);
+                renderer.material.SetFloat("_MetallicGlossMap", 1);
+                renderer.material.SetFloat("_EmissionMap", 1);
+                */
+            }
+
             _rendered = true;
             _load = false;
         }
